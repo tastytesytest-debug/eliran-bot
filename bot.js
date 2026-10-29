@@ -7,14 +7,15 @@ import QRCode from "qrcode";
 const GROUP_NAME = "שיחה עם אלירן";
 const PORT = process.env.PORT || 10000;
 let lastQR = "";
+let lastReplyTime = 0;
 
 http.createServer(async (req,res)=>{
   if(req.url==="/qr" && lastQR){
     const img = await QRCode.toDataURL(lastQR);
     res.writeHead(200, {"Content-Type":"text/html"});
-    return res.end(`<h1>סרוק את ה-QR בוואטסאפ</h1><img src="${img}" style="width:400px"><script>setTimeout(()=>location.reload(),5000)</script>`);
+    return res.end(`<h1>סרוק QR</h1><img src="${img}" style="width:400px"><script>setTimeout(()=>location.reload(),5000)</script>`);
   }
-  res.writeHead(200); res.end(`<a href="/qr">לחץ כאן ל-QR</a> - Bot Running`);
+  res.writeHead(200); res.end(`Bot Running`);
 }).listen(PORT, ()=>console.log("Server on "+PORT));
 
 function loadResponses(){
@@ -26,30 +27,28 @@ async function start(){
   const sock = makeWASocket({auth:{creds:state.creds, keys:makeCacheableSignalKeyStore(state.keys, pino({level:'silent'}))}, logger:pino({level:'silent'}), browser:["Eliran Bot","Chrome","1.0"]});
   sock.ev.on('creds.update', saveCreds);
   sock.ev.on('connection.update', ({ connection, lastDisconnect, qr }) => {
-    if(qr){ lastQR=qr; console.log("QR חדש! כנס ל- /qr באתר"); }
+    if(qr){ lastQR=qr; console.log("QR חדש! /qr"); }
     if(connection==='close' && lastDisconnect?.error?.output?.statusCode !== DisconnectReason.loggedOut) start();
-    if(connection==='open'){ console.log("!!! הבוט מחובר ועובד 24/7 !!!"); lastQR=""; }
+    if(connection==='open'){ console.log("!!! מחובר !!!"); lastQR=""; }
   });
-  
-  // למניעת לופים
-  const processed = new Set();
-
   sock.ev.on('messages.upsert', async ({ messages }) => {
     const msg=messages[0]; 
     if(!msg?.message) return;
-    if(msg.key.fromMe) return; // אל תענה לעצמך!
-    if(processed.has(msg.key.id)) return;
-    processed.add(msg.key.id);
-    setTimeout(()=>processed.delete(msg.key.id), 60000);
+    if(msg.key.fromMe) return;
+    
+    const now = Date.now();
+    if(now - lastReplyTime < 30000) return; // לא לענות יותר מפעם ב-30 שניות
 
     if(msg.key.remoteJid && !msg.key.remoteJid.endsWith('@g.us')) return;
     try{
       const group=await sock.groupMetadata(msg.key.remoteJid);
       if(group.subject!==GROUP_NAME) return;
+      
       const text=(msg.message.conversation||msg.message.extendedTextMessage?.text||"").toLowerCase();
       
-      // אל תענה אם זה הודעה של הבוט עצמו
-      if(text.includes("ג'וניור") || text.includes("כאן ג'וניור")) return;
+      // אם ההודעה היא מהבוט עצמו - אל תענה
+      const sender = msg.key.participant || msg.key.remoteJid;
+      if(sender === sock.user?.id) return;
 
       const r=loadResponses(); let reply=null;
       if(text.includes('מתי')) reply=r.visit;
@@ -58,7 +57,8 @@ async function start(){
       else if(text.includes('בוקר טוב')||text.includes('מה שלומך')) reply=r.morning;
       
       if(reply){
-        console.log("עונה ל:", text, "->", reply);
+        lastReplyTime = now;
+        console.log("עונה:", reply);
         await sock.sendMessage(msg.key.remoteJid, {text:reply});
       }
     }catch(e){console.log(e.message)}

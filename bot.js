@@ -2,13 +2,17 @@ import makeWASocket, { useMultiFileAuthState, DisconnectReason, makeCacheableSig
 import qrcode from "qrcode-terminal";
 import pino from "pino";
 import fs from "fs";
+import http from "http";
 
 const GROUP_NAME = "שיחה עם אלירן";
+const PORT = process.env.PORT || 10000;
+
+// שרת קטן כדי ש-Render לא יכבה אותנו
+http.createServer((req,res)=>{res.writeHead(200); res.end("Eliran Bot Running 24/7");}).listen(PORT, ()=>console.log("Server on "+PORT));
 
 function loadResponses() {
-    try {
-        return JSON.parse(fs.readFileSync("./responses.json","utf8"));
-    } catch {
+    try { return JSON.parse(fs.readFileSync("./responses.json","utf8")); }
+    catch {
         return {
             morning: "בוקר טוב! כאן ג'וניור ❤️ אלירן מסר שהוא מרגיש טוב ואוהב אותך.",
             visit: "כאן ג'וניור ❤️ אלירן ביקש למסור שיבואו בקרוב ויעדכן אותך.",
@@ -25,14 +29,12 @@ async function start() {
         logger: pino({ level: 'silent' }),
         browser: ["Eliran Bot", "Chrome", "1.0"]
     });
-
     sock.ev.on('creds.update', saveCreds);
     sock.ev.on('connection.update', ({ connection, lastDisconnect, qr }) => {
         if (qr) { console.log("QR CODE:"); qrcode.generate(qr, { small: true }); }
         if (connection === 'close' && lastDisconnect?.error?.output?.statusCode !== DisconnectReason.loggedOut) start();
         if (connection === 'open') console.log("!!! הבוט מחובר ועובד 24/7 !!!");
     });
-
     sock.ev.on('messages.upsert', async ({ messages }) => {
         const msg = messages[0];
         if (!msg?.message) return;

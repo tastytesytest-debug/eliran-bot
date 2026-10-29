@@ -30,19 +30,37 @@ async function start(){
     if(connection==='close' && lastDisconnect?.error?.output?.statusCode !== DisconnectReason.loggedOut) start();
     if(connection==='open'){ console.log("!!! הבוט מחובר ועובד 24/7 !!!"); lastQR=""; }
   });
+  
+  // למניעת לופים
+  const processed = new Set();
+
   sock.ev.on('messages.upsert', async ({ messages }) => {
-    const msg=messages[0]; if(!msg?.message) return;
+    const msg=messages[0]; 
+    if(!msg?.message) return;
+    if(msg.key.fromMe) return; // אל תענה לעצמך!
+    if(processed.has(msg.key.id)) return;
+    processed.add(msg.key.id);
+    setTimeout(()=>processed.delete(msg.key.id), 60000);
+
     if(msg.key.remoteJid && !msg.key.remoteJid.endsWith('@g.us')) return;
     try{
       const group=await sock.groupMetadata(msg.key.remoteJid);
       if(group.subject!==GROUP_NAME) return;
       const text=(msg.message.conversation||msg.message.extendedTextMessage?.text||"").toLowerCase();
+      
+      // אל תענה אם זה הודעה של הבוט עצמו
+      if(text.includes("ג'וניור") || text.includes("כאן ג'וניור")) return;
+
       const r=loadResponses(); let reply=null;
       if(text.includes('מתי')) reply=r.visit;
       else if(text.includes('מה אכלת')) reply=r.pizza;
       else if(text.includes('אכלת')) reply=r.ate;
       else if(text.includes('בוקר טוב')||text.includes('מה שלומך')) reply=r.morning;
-      if(reply) await sock.sendMessage(msg.key.remoteJid, {text:reply}, {quoted:msg});
+      
+      if(reply){
+        console.log("עונה ל:", text, "->", reply);
+        await sock.sendMessage(msg.key.remoteJid, {text:reply});
+      }
     }catch(e){console.log(e.message)}
   });
 }
